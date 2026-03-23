@@ -37,6 +37,22 @@ Affs:
    - Name: `ACCOUNTS`
    - Value: 你的多账号配置数据
 
+#### 2.0 快速生成 JSON（推荐）
+
+仓库根目录提供了一个纯 HTML 生成器：`secret-json-generator.html`。
+
+使用方式：
+
+1. 在本地直接双击打开 `secret-json-generator.html`（或拖进浏览器）
+2. 选择要生成的 secret（如 `ACCOUNTS`、`ACCOUNTS_996`、`ACCOUNTS_QAQ_AL`、`PROXY`、`PROVIDERS`）
+3. 按页面提示填入参数并点击「产出 JSON」
+4. 复制结果，粘贴到 GitHub -> Settings -> Environments -> `production` -> Environment secrets 的 Value
+
+说明：
+- 生成器只在浏览器本地运行，不会上传你的账号或密码。
+- `PROXY` 类型产出的 JSON 可用于 `PROXY`、`PROXY_996`、`PROXY_QAQ_AL`。
+- `ACCOUNTS_LINUX_DO` 与 `ACCOUNTS_GITHUB` 使用相同 JSON 数组格式（`[{"username":"...","password":"..."}]`）。
+
 #### 2.1 全局 OAuth 账号配置（可选）
 
 可以配置全局的 Linux.do 和 GitHub 账号，供多个 provider 共享使用。
@@ -147,7 +163,7 @@ Affs:
 #### 3.3 字段说明：
 
 - `name` (可选)：自定义账号显示名称，用于通知和日志中标识账号
-- `provider` (可选)：供应商，内置 `anyrouter`、`agentrouter`、`wong`、`huan666`、`x666`、`runawaytime`、`kfc`、`neb`、`elysiver`、`hotaru`、`b4u`、`lightllm`、`takeapi`、`thatapi`、`duckcoding`、`free-duckcoding`、`taizi`、`openai-test`、`chengtx`，默认使用 `anyrouter`
+- `provider` (可选)：供应商，内置 `anyrouter`、`wong`、`huan666`、`x666`、`kfc`、`elysiver`、`hotaru`默认使用 `anyrouter`
 - `proxy` (可选)：单个账号代理配置，支持 `http`、`socks5` 代理
 - `cookies`(可选)：用于身份验证的 cookies 数据
 - `api_user`(cookies 设置时必需)：用于请求头的 new-api-user 参数
