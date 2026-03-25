@@ -11,6 +11,11 @@ from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
 from utils.browser_utils import filter_cookies, take_screenshot, save_page_content_to_file
 from utils.config import ProviderConfig
 from utils.get_headers import get_browser_headers, print_browser_headers
+from utils.linuxdo_login_rate_limit import (
+    apply_linuxdo_login_rate_limit_backoff,
+    detect_linuxdo_login_rate_limit,
+    get_active_linuxdo_login_rate_limit_error,
+)
 
 
 class LinuxDoSignIn:
@@ -60,6 +65,11 @@ class LinuxDoSignIn:
             f"ℹ️ {self.account_name}: Using client_id: {client_id}, auth_state: {auth_state}, cache_file: {cache_file_path}"
         )
 
+        active_linuxdo_login_rate_limit_error = get_active_linuxdo_login_rate_limit_error()
+        if active_linuxdo_login_rate_limit_error:
+            print(f"⚠️ {self.account_name}: {active_linuxdo_login_rate_limit_error}")
+            return False, {'error': active_linuxdo_login_rate_limit_error}, None
+
         # 使用 Camoufox 启动浏览器
         async with AsyncCamoufox(
             # persistent_context=True,
@@ -107,13 +117,40 @@ class LinuxDoSignIn:
                             print(f"ℹ️ {self.account_name}: Checking login status at {oauth_url}")
                             # 直接访问授权页面检查是否已登录
                             response = await page.goto(oauth_url, wait_until="domcontentloaded")
+                            await page.wait_for_timeout(3000)
+                            current_url = page.url
                             print(
                                 f"ℹ️ {self.account_name}: redirected to app page {response.url if response else 'N/A'}"
                             )
+                            print(f"ℹ️ {self.account_name}: Current URL after cache restore check: {current_url}")
                             await save_page_content_to_file(page, "sign_in_check", self.account_name, prefix="linuxdo")
 
+                            if current_url.startswith("https://linux.do/session/sso_provider"):
+                                print(
+                                    f"ℹ️ {self.account_name}: Waiting for Linux.do SSO intermediate page to finish redirecting"
+                                )
+                                try:
+                                    await page.wait_for_function(
+                                        """(providerOrigin) => {
+                                            const bodyText = document.body?.innerText || "";
+                                            return window.location.href.startsWith(providerOrigin)
+                                                || window.location.href.startsWith("https://linux.do/login")
+                                                || !!document.querySelector('a[href^="/oauth2/approve"]')
+                                                || !!document.querySelector("#login-account-name")
+                                                || bodyText.includes("Too Many Requests");
+                                        }""",
+                                        self.provider_config.origin,
+                                        timeout=8000,
+                                    )
+                                except Exception:
+                                    pass
+                                current_url = page.url
+                                print(
+                                    f"ℹ️ {self.account_name}: URL after waiting on Linux.do SSO intermediate page: {current_url}"
+                                )
+
                             # 登录后可能直接跳转回应用页面
-                            if response and response.url.startswith(self.provider_config.origin):
+                            if current_url.startswith(self.provider_config.origin):
                                 is_logged_in = True
                                 print(
                                     f"✅ {self.account_name}: Already logged in via cache, proceeding to authorization"
@@ -139,11 +176,24 @@ class LinuxDoSignIn:
                         try:
                             print(f"ℹ️ {self.account_name}: Starting to sign in linux.do")
 
-                            await page.goto("https://linux.do/login", wait_until="domcontentloaded")
+                            response = await page.goto("https://linux.do/login", wait_until="domcontentloaded")
+                            await page.wait_for_timeout(3000)
 
                             # 检查是否在 Cloudflare 验证页面
+                            current_url = page.url
                             page_title = await page.title()
                             page_content = await page.content()
+
+                            if response and response.status == 429 or detect_linuxdo_login_rate_limit(page_title, page_content):
+                                active_linuxdo_login_rate_limit_error = apply_linuxdo_login_rate_limit_backoff(
+                                    f'Linux.do login page returned Too Many Requests at {current_url}'
+                                )
+                                print(f"⚠️ {self.account_name}: {active_linuxdo_login_rate_limit_error}")
+                                await save_page_content_to_file(
+                                    page, "linuxdo_login_rate_limited", self.account_name, prefix="linuxdo"
+                                )
+                                await take_screenshot(page, "linuxdo_login_rate_limited", self.account_name)
+                                return False, {'error': active_linuxdo_login_rate_limit_error}, None
 
                             if "Just a moment" in page_title or "Checking your browser" in page_content:
                                 print(f"ℹ️ {self.account_name}: Cloudflare challenge detected, auto-solving...")
@@ -155,6 +205,34 @@ class LinuxDoSignIn:
                                     await page.wait_for_timeout(10000)
                                 except Exception as solve_err:
                                     print(f"⚠️ {self.account_name}: Auto-solve failed: {solve_err}")
+
+                            try:
+                                await page.wait_for_selector("#login-account-name", timeout=10000)
+                            except Exception:
+                                current_url = page.url
+                                page_title = await page.title()
+                                page_content = await page.content()
+
+                                if detect_linuxdo_login_rate_limit(page_title, page_content):
+                                    active_linuxdo_login_rate_limit_error = apply_linuxdo_login_rate_limit_backoff(
+                                        f'Linux.do login page returned Too Many Requests at {current_url}'
+                                    )
+                                    print(f"⚠️ {self.account_name}: {active_linuxdo_login_rate_limit_error}")
+                                    await save_page_content_to_file(
+                                        page, "linuxdo_login_rate_limited", self.account_name, prefix="linuxdo"
+                                    )
+                                    await take_screenshot(page, "linuxdo_login_rate_limited", self.account_name)
+                                    return False, {'error': active_linuxdo_login_rate_limit_error}, None
+
+                                print(
+                                    f"❌ {self.account_name}: Linux.do login form not found. "
+                                    f"Current URL: {current_url}, page title: {page_title}"
+                                )
+                                await save_page_content_to_file(
+                                    page, "linuxdo_login_form_not_found", self.account_name, prefix="linuxdo"
+                                )
+                                await take_screenshot(page, "linuxdo_login_form_not_found", self.account_name)
+                                return False, {"error": "Linux.do login form not found"}, None
 
                             await page.fill("#login-account-name", self.username)
                             await page.wait_for_timeout(2000)

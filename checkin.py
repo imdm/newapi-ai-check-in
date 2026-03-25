@@ -19,6 +19,7 @@ from utils.get_cf_clearance import get_cf_clearance
 from utils.http_utils import proxy_resolve, response_resolve
 from utils.topup import topup
 from utils.get_headers import get_curl_cffi_impersonate
+from utils.linuxdo_login_rate_limit import get_active_linuxdo_login_rate_limit_error
 from utils.mask_utils import mask_username
 
 class CheckIn:
@@ -1210,6 +1211,11 @@ class CheckIn:
         print(
             f"ℹ️ {self.account_name}: Executing check-in with Linux.do account (using proxy: {'true' if self.http_proxy_config else 'false'})"
         )
+
+        active_linuxdo_login_rate_limit_error = get_active_linuxdo_login_rate_limit_error()
+        if active_linuxdo_login_rate_limit_error:
+            print(f"⚠️ {self.account_name}: {active_linuxdo_login_rate_limit_error}")
+            return False, {'error': active_linuxdo_login_rate_limit_error}
 
         # 根据 User-Agent 自动推断 impersonate 值，在 Session 上设置全局 impersonate
         user_agent = common_headers.get("User-Agent", "")
